@@ -109,7 +109,7 @@ try {
     Wait-Window 'WPM Counter Overlay' | Out-Null
 
     # Put the dashboard at a known spot, bring it forward, and let it render.
-    [Win]::SetWindowPos($dash, [IntPtr]::Zero, 40, 40, 1100, 800, 0x0040) | Out-Null
+    [Win]::SetWindowPos($dash, [IntPtr]::Zero, 20, 20, 1360, 830, 0x0040) | Out-Null
     [Win]::SetForegroundWindow($dash) | Out-Null
     Start-Sleep -Seconds 6
 
