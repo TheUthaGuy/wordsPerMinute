@@ -1,2 +1,4 @@
 target/
 *.tmp
+docs/screenshots/*.log
+docs/screenshots/failure-*.png
