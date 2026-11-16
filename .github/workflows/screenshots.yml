@@ -1,0 +1,77 @@
+name: Screenshots
+
+# Builds the app on a Windows VM, runs it with demo data, and commits fresh
+# screenshots to docs/screenshots for the README.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/screenshots.yml'
+      - '.github/scripts/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    runs-on: windows-latest
+    env:
+      MESA_VERSION: 24.2.7
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # The runner has no GPU, so drop Mesa's software OpenGL next to the exe
+      # so eframe's glow renderer gets a modern GL context.
+      - name: Install software OpenGL (Mesa llvmpipe)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/pal1000/mesa-dist-win/releases/download/$env:MESA_VERSION/mesa3d-$env:MESA_VERSION-release-msvc.7z"
+          Invoke-WebRequest -Uri $url -OutFile mesa.7z
+          7z x mesa.7z -omesa -y | Out-Null
+          foreach ($dll in 'opengl32.dll', 'libgallium_wgl.dll', 'libglapi.dll') {
+            $src = Join-Path mesa\x64 $dll
+            if (Test-Path $src) { Copy-Item $src target\release\ }
+          }
+          "GALLIUM_DRIVER=llvmpipe" >> $env:GITHUB_ENV
+
+      - name: Seed demo sessions
+        shell: pwsh
+        run: ./.github/scripts/seed-demo-data.ps1
+
+      - name: Run app and take screenshots
+        shell: pwsh
+        run: ./.github/scripts/screenshot.ps1 -Exe target\release\wpm-counter.exe -OutDir docs\screenshots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: docs/screenshots/*.png
+
+      - name: Commit screenshots
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898733+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots/*.png
+          if git diff --cached --quiet; then
+            echo "Screenshots unchanged"
+          else
+            git commit -m "Update screenshots [skip ci]"
+            git push
+          fi
