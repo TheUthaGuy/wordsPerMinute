@@ -6,7 +6,9 @@ A Windows app that measures your typing speed everywhere you type. It doesn't us
 
 Written in Rust with [egui](https://github.com/emilk/egui).
 
-![Dashboard](docs/screenshots/dashboard.png)
+![Dashboard: current session](docs/screenshots/dashboard.png)
+
+![Dashboard: past sessions](docs/screenshots/history.png)
 
 <p align="center">
   <img src="docs/screenshots/overlay.png" alt="Overlay" />
@@ -137,7 +139,7 @@ The images in this README come from the [`Screenshots`](.github/workflows/screen
 1. Builds the release exe.
 2. Installs Mesa's software OpenGL renderer (llvmpipe), because the VM has no GPU.
 3. Fills `%APPDATA%\WpmCounter\data` with a week of made-up sessions ([`seed-demo-data.ps1`](.github/scripts/seed-demo-data.ps1)).
-4. Starts the app and captures the desktop, the dashboard and the overlay ([`screenshot.ps1`](.github/scripts/screenshot.ps1)).
+4. Starts the app and captures the desktop, the overlay and the dashboard's *Current session* and *Past sessions* tabs ([`screenshot.ps1`](.github/scripts/screenshot.ps1)).
 5. Commits the PNGs to `docs/screenshots/` and uploads them as a build artifact.
 
 It runs when the source changes on `main`. You can also start it by hand from the **Actions** tab (**Run workflow**).

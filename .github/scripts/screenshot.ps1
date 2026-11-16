@@ -17,6 +17,40 @@ public static class Win {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int hgt, uint flags);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
+    public static void Click(IntPtr h, int cx, int cy) {
+        var p = new POINT { X = cx, Y = cy };
+        ClientToScreen(h, ref p);
+        SetCursorPos(p.X, p.Y);
+        System.Threading.Thread.Sleep(200);
+        mouse_event(0x2, 0, 0, 0, UIntPtr.Zero); // left down
+        System.Threading.Thread.Sleep(80);
+        mouse_event(0x4, 0, 0, 0, UIntPtr.Zero); // left up
+        System.Threading.Thread.Sleep(200);
+        SetCursorPos(0, 0);
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DEVMODE {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+        public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+        public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+        public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+        public short dmLogPixels;
+        public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
+        public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+    }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool EnumDisplaySettings(string dev, int mode, ref DEVMODE dm);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int ChangeDisplaySettings(ref DEVMODE dm, int flags);
+    public static int SetResolution(int w, int h) {
+        var dm = new DEVMODE(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+        if (!EnumDisplaySettings(null, -1, ref dm)) return -99;
+        dm.dmPelsWidth = w; dm.dmPelsHeight = h; dm.dmFields = 0x80000 | 0x100000;
+        return ChangeDisplaySettings(ref dm, 0);
+    }
     public delegate bool EnumProc(IntPtr h, IntPtr l);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
@@ -49,12 +83,20 @@ function Save-Region([int]$x, [int]$y, [int]$w, [int]$h, [string]$path) {
 
 function Wait-Window([string]$title, [int]$seconds = 60) {
     for ($i = 0; $i -lt $seconds * 2; $i++) {
-        $h = [Win]::FindWindow($null, $title)
+        # [NullString]::Value: PowerShell would turn $null into "" here.
+        $h = [Win]::FindWindow([NullString]::Value, $title)
         if ($h -ne [IntPtr]::Zero) { return $h }
         Start-Sleep -Milliseconds 500
     }
     throw "Window '$title' did not appear within $seconds s"
 }
+
+# The runner's screen is 1024x768, too small for the dashboard. Try to enlarge it.
+$res = [Win]::SetResolution(1600, 900)
+Write-Host "ChangeDisplaySettings(1600x900) returned $res (0 = success)"
+# Minimise the runner's own console so it isn't behind the app.
+(New-Object -ComObject Shell.Application).MinimizeAll()
+Start-Sleep -Seconds 2
 
 $env:RUST_BACKTRACE = '1'
 $env:RUST_LOG = 'warn'
@@ -67,7 +109,7 @@ try {
     Wait-Window 'WPM Counter Overlay' | Out-Null
 
     # Put the dashboard at a known spot, bring it forward, and let it render.
-    [Win]::SetWindowPos($dash, [IntPtr]::Zero, 60, 60, 1080, 760, 0x0040) | Out-Null
+    [Win]::SetWindowPos($dash, [IntPtr]::Zero, 40, 40, 1100, 800, 0x0040) | Out-Null
     [Win]::SetForegroundWindow($dash) | Out-Null
     Start-Sleep -Seconds 6
 
@@ -81,10 +123,17 @@ try {
     Save-Region $r.Left $r.Top ($r.Right - $r.Left) ($r.Bottom - $r.Top) (Join-Path $OutDir 'dashboard.png')
 
     # The overlay sits in the top-right corner of the screen by default.
-    $overlay = [Win]::FindWindow($null, 'WPM Counter Overlay')
+    $overlay = [Win]::FindWindow([NullString]::Value, 'WPM Counter Overlay')
     [Win]::GetWindowRect($overlay, [ref]$r) | Out-Null
     $pad = 16
     Save-Region ($r.Left - $pad) ($r.Top - $pad) ($r.Right - $r.Left + 2 * $pad) ($r.Bottom - $r.Top + 2 * $pad) (Join-Path $OutDir 'overlay.png')
+
+    # Open the "Past sessions" tab (client coords of the tab button) and capture it.
+    [Win]::SetForegroundWindow($dash) | Out-Null
+    [Win]::Click($dash, 335, 23)
+    Start-Sleep -Seconds 3
+    [Win]::GetWindowRect($dash, [ref]$r) | Out-Null
+    Save-Region $r.Left $r.Top ($r.Right - $r.Left) ($r.Bottom - $r.Top) (Join-Path $OutDir 'history.png')
 }
 catch {
     Write-Host "::group::Diagnostics"
