@@ -66,7 +66,7 @@ impl StatKind {
             StatKind::Duration => "TIME",
             StatKind::ActiveTime => "ACTIVE",
             StatKind::TodayWords => "TODAY",
-            StatKind::TodayTime => "TODAY T",
+            StatKind::TodayTime => "TODAY TIME",
             StatKind::AllTimeWords => "TOTAL",
         }
     }

@@ -984,7 +984,13 @@ fn overlay_settings(ui: &mut egui::Ui, t: &Theme, o: &mut OverlaySettings) {
         ui.checkbox(&mut o.highlight_first, "Make the first stat bigger and accent-colored");
         ui.end_row();
         ui.label("Numbers");
-        ui.checkbox(&mut o.monospace_values, "Monospace digits (less jitter)");
+        ui.checkbox(&mut o.monospace_values, "Monospace digits");
+        ui.end_row();
+        ui.label("Activity dot");
+        ui.checkbox(&mut o.show_dot, "Show a dot that lights up while typing (Minimal pill)");
+        ui.end_row();
+        ui.label("Idle");
+        ui.checkbox(&mut o.dim_when_idle, "Dim the numbers when you're not typing");
         ui.end_row();
     });
     ui.add_space(6.0);
@@ -1008,7 +1014,8 @@ fn overlay_settings(ui: &mut egui::Ui, t: &Theme, o: &mut OverlaySettings) {
         ui.add(egui::Slider::new(&mut o.border_width, 0.0..=6.0));
         ui.end_row();
         ui.label("Corner rounding");
-        ui.add(egui::Slider::new(&mut o.rounding, 0.0..=40.0));
+        ui.add(egui::Slider::new(&mut o.rounding, 0.0..=100.0))
+            .on_hover_text("High values give a fully rounded pill shape");
         ui.end_row();
         ui.label("Padding");
         ui.add(egui::Slider::new(&mut o.padding, 0.0..=40.0));
@@ -1018,9 +1025,18 @@ fn overlay_settings(ui: &mut egui::Ui, t: &Theme, o: &mut OverlaySettings) {
         ui.end_row();
     });
     ui.add_space(10.0);
-    if ui.button("Reset overlay to defaults").clicked() {
-        *o = OverlaySettings::default();
-    }
+    ui.horizontal(|ui| {
+        if ui
+            .button("Reset look")
+            .on_hover_text("Restore the default style but keep position and stats")
+            .clicked()
+        {
+            o.apply_default_look();
+        }
+        if ui.button("Reset everything").clicked() {
+            *o = OverlaySettings::default();
+        }
+    });
 }
 
 fn session_settings(ui: &mut egui::Ui, t: &Theme, s: &mut SessionSettings) {

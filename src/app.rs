@@ -1,4 +1,4 @@
-use crate::dashboard::UiState;
+﻿use crate::dashboard::UiState;
 use crate::hook::{self, HookEvent};
 use crate::hotkey::{Hotkey, HotkeyAction};
 use crate::settings::{Anchor, HotkeySettings, OverlayLayout, OverlaySettings, Settings, Theme};
@@ -303,12 +303,15 @@ impl App {
 
         let snap = self.snapshot(now);
         let paused = self.tracker.paused;
+        let typing = !paused && since_activity < 2.5;
+        let activity =
+            ctx.animate_bool_with_time(egui::Id::new("overlay_activity"), typing, 0.6);
         let resp = egui::Area::new(egui::Id::new("overlay_area"))
             .fixed_pos(Pos2::ZERO)
             .constrain(false)
             .show(ctx, |ui| {
                 ui.set_opacity(opacity);
-                overlay_contents(ui, &o, &snap, paused);
+                overlay_contents(ui, &o, &snap, paused, activity);
             });
 
         // Fit the window to the content.
@@ -428,24 +431,79 @@ fn text(ui: &mut egui::Ui, s: impl Into<String>, size: f32, color: Color32, mono
     );
 }
 
-fn overlay_contents(ui: &mut egui::Ui, o: &OverlaySettings, snap: &Snapshot, paused: bool) {
+/// Approximate share of a text row below the baseline.
+const DESCENT: f32 = 0.2;
+
+/// Allocates `width` x `row_h` and paints the text so that its baseline sits on
+/// the row's shared baseline (so different font sizes line up neatly).
+fn baseline_text(
+    ui: &mut egui::Ui,
+    s: String,
+    font: FontId,
+    color: Color32,
+    min_width: f32,
+    row_h: f32,
+) {
+    let painter = ui.painter().clone();
+    let galley = painter.layout_no_wrap(s, font, color);
+    let gs = galley.size();
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(min_width.max(gs.x), row_h), egui::Sense::hover());
+    let baseline = rect.bottom() - row_h * DESCENT;
+    let top = baseline - gs.y * (1.0 - DESCENT);
+    painter.galley(egui::pos2(rect.right() - gs.x, top), galley, color);
+}
+
+/// A number right-aligned in a box as wide as the same number with every digit
+/// replaced by 0, so the overlay doesn't wobble as values change.
+fn stable_value(ui: &mut egui::Ui, s: String, font: FontId, color: Color32, row_h: f32) {
+    let zeros: String = s.chars().map(|ch| if ch.is_ascii_digit() { '0' } else { ch }).collect();
+    let reserved = ui.painter().layout_no_wrap(zeros, font.clone(), color).size().x;
+    baseline_text(ui, s, font, color, reserved, row_h);
+}
+
+fn overlay_contents(
+    ui: &mut egui::Ui,
+    o: &OverlaySettings,
+    snap: &Snapshot,
+    paused: bool,
+    activity: f32,
+) {
     let stats: Vec<StatKind> = o.stats.iter().filter(|t| t.enabled).map(|t| t.kind).collect();
     let fs = o.font_size;
     let label_size = (fs * 0.5).max(8.0);
+    let label_col = c(o.label);
+    // Numbers fade toward the label color while idle.
+    let brightness = if o.dim_when_idle { 0.35 + 0.65 * activity } else { 1.0 };
+    let value_color = |i: usize| -> Color32 {
+        let full = if i == 0 && o.highlight_first { c(o.accent) } else { c(o.text) };
+        theme::mix(label_col, full, brightness)
+    };
     let value_style = |i: usize| -> (f32, Color32) {
-        if i == 0 && o.highlight_first {
-            (fs * 1.3, c(o.accent))
-        } else {
-            (fs, c(o.text))
-        }
+        let size = if i == 0 && o.highlight_first { fs * 1.3 } else { fs };
+        (size, value_color(i))
+    };
+    let value_font = |size: f32| {
+        if o.monospace_values { FontId::monospace(size) } else { FontId::proportional(size) }
+    };
+
+    let minimal = o.layout == OverlayLayout::Minimal;
+    let margin = if minimal {
+        egui::Margin::symmetric(o.padding * 1.75, o.padding * 0.7)
+    } else {
+        egui::Margin::same(o.padding)
     };
 
     egui::Frame::none()
         .fill(c(o.background))
         .stroke(Stroke::new(o.border_width, c(o.border)))
         .rounding(o.rounding)
-        .inner_margin(o.padding)
+        .inner_margin(margin)
         .show(ui, |ui| {
+            if minimal {
+                minimal_row(ui, o, snap, &stats, paused, activity, &value_color, &value_font);
+                return;
+            }
             ui.spacing_mut().item_spacing = egui::vec2(o.spacing, (o.spacing * 0.3).max(2.0));
             if paused {
                 text(ui, "PAUSED", label_size * 1.2, c(o.accent), false);
@@ -489,7 +547,7 @@ fn overlay_contents(ui: &mut egui::Ui, o: &OverlaySettings, snap: &Snapshot, pau
                         ui.spacing_mut().item_spacing.x = (o.spacing * 0.35).max(3.0);
                         for (i, k) in stats.iter().enumerate() {
                             if i > 0 {
-                                text(ui, "·", fs, c(o.label), false);
+                                text(ui, "Â·", fs, c(o.label), false);
                             }
                             let (_, color) = value_style(i);
                             text(ui, snap.value(*k), fs, color, o.monospace_values);
@@ -499,8 +557,71 @@ fn overlay_contents(ui: &mut egui::Ui, o: &OverlaySettings, snap: &Snapshot, pau
                         }
                     });
                 }
+                OverlayLayout::Minimal => {}
             }
         });
+}
+
+/// `â— 72 wpm â”‚ 64 avg`: one quiet line, numbers first, units small and muted.
+#[allow(clippy::too_many_arguments)]
+fn minimal_row(
+    ui: &mut egui::Ui,
+    o: &OverlaySettings,
+    snap: &Snapshot,
+    stats: &[StatKind],
+    paused: bool,
+    activity: f32,
+    value_color: &dyn Fn(usize) -> Color32,
+    value_font: &dyn Fn(f32) -> FontId,
+) {
+    let fs = o.font_size;
+    let unit_size = (fs * 0.55).max(9.0);
+    let label_col = c(o.label);
+    let big = if o.highlight_first { fs * 1.15 } else { fs };
+    let row_h = ui.fonts(|f| f.row_height(&value_font(big)));
+    let gap = (o.spacing * 0.5).max(2.0);
+    // Vertical middle of the digits (between baseline and cap height).
+    let mid = row_h * (1.0 - DESCENT) - fs * 0.36;
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+
+        if o.show_dot {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(fs * 0.3, row_h), egui::Sense::hover());
+            let center = egui::pos2(rect.center().x, rect.top() + mid);
+            let idle = theme::mix(c(o.background), label_col, 0.6);
+            let col = if paused { c(o.accent) } else { theme::mix(idle, c(o.accent), activity) };
+            ui.painter().circle_filled(center, (fs * 0.14).max(2.5), col);
+            ui.add_space(fs * 0.45);
+        }
+
+        if paused || stats.is_empty() {
+            let msg = if paused { "paused" } else { "no stats" };
+            baseline_text(ui, msg.into(), FontId::proportional(fs * 0.8), label_col, 0.0, row_h);
+            return;
+        }
+
+        for (i, k) in stats.iter().enumerate() {
+            if i > 0 {
+                ui.add_space(gap);
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, row_h), egui::Sense::hover());
+                let x = rect.center().x;
+                let half = fs * 0.42;
+                ui.painter().line_segment(
+                    [egui::pos2(x, rect.top() + mid - half), egui::pos2(x, rect.top() + mid + half)],
+                    Stroke::new(1.0_f32, label_col.gamma_multiply(0.35)),
+                );
+                ui.add_space(gap);
+            }
+            let size = if i == 0 { big } else { fs };
+            stable_value(ui, snap.value(*k), value_font(size), value_color(i), row_h);
+            if o.show_labels {
+                ui.add_space(fs * 0.22);
+                let unit = k.short().to_lowercase();
+                baseline_text(ui, unit, FontId::proportional(unit_size), label_col, 0.0, row_h);
+            }
+        }
+    });
 }
 
 impl eframe::App for App {

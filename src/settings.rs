@@ -72,17 +72,23 @@ impl Anchor {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OverlayLayout {
+    Minimal,
     Horizontal,
     Vertical,
     Compact,
 }
 
 impl OverlayLayout {
-    pub const ALL: [OverlayLayout; 3] =
-        [OverlayLayout::Horizontal, OverlayLayout::Vertical, OverlayLayout::Compact];
+    pub const ALL: [OverlayLayout; 4] = [
+        OverlayLayout::Minimal,
+        OverlayLayout::Horizontal,
+        OverlayLayout::Vertical,
+        OverlayLayout::Compact,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
+            OverlayLayout::Minimal => "Minimal pill",
             OverlayLayout::Horizontal => "Horizontal tiles",
             OverlayLayout::Vertical => "Vertical list",
             OverlayLayout::Compact => "Compact line",
@@ -148,37 +154,74 @@ pub struct OverlaySettings {
     pub show_labels: bool,
     pub highlight_first: bool,
     pub monospace_values: bool,
+    /// Small dot that lights up while you're typing.
+    pub show_dot: bool,
+    /// Dim the numbers when you're not typing.
+    pub dim_when_idle: bool,
     pub auto_hide: bool,
     pub auto_hide_secs: f32,
     pub stats: Vec<StatToggle>,
+    /// Bumped when the default look changes; older files get the new look.
+    #[serde(default)]
+    pub style_version: u32,
 }
+
+pub const OVERLAY_STYLE_VERSION: u32 = 2;
 
 impl Default for OverlaySettings {
     fn default() -> Self {
-        Self {
+        let mut s = Self {
             enabled: true,
             anchor: Anchor::TopRight,
             margin: 24.0,
             custom_pos: [100.0, 100.0],
             locked: true,
-            font_size: 22.0,
-            background: [20, 22, 27, 210],
-            text: [240, 242, 246, 255],
-            label: [150, 158, 175, 255],
-            accent: [91, 156, 255, 255],
-            border: [255, 255, 255, 28],
-            border_width: 1.0,
-            rounding: 10.0,
-            padding: 10.0,
-            spacing: 16.0,
-            layout: OverlayLayout::Horizontal,
+            font_size: 20.0,
+            background: [0, 0, 0, 0],
+            text: [0, 0, 0, 0],
+            label: [0, 0, 0, 0],
+            accent: [0, 0, 0, 0],
+            border: [0, 0, 0, 0],
+            border_width: 0.0,
+            rounding: 0.0,
+            padding: 0.0,
+            spacing: 0.0,
+            layout: OverlayLayout::Minimal,
             show_labels: true,
-            highlight_first: true,
-            monospace_values: true,
+            highlight_first: false,
+            monospace_values: false,
+            show_dot: true,
+            dim_when_idle: true,
             auto_hide: false,
             auto_hide_secs: 10.0,
-            stats: stat_list(&[StatKind::LiveWpm, StatKind::AverageWpm, StatKind::Words]),
-        }
+            stats: stat_list(&[StatKind::LiveWpm, StatKind::AverageWpm]),
+            style_version: OVERLAY_STYLE_VERSION,
+        };
+        s.apply_default_look();
+        s
+    }
+}
+
+impl OverlaySettings {
+    /// Resets only the visual style, keeping position, behaviour and chosen stats.
+    pub fn apply_default_look(&mut self) {
+        self.font_size = 20.0;
+        self.background = [12, 13, 17, 165];
+        self.text = [245, 246, 250, 255];
+        self.label = [160, 166, 180, 255];
+        self.accent = [110, 168, 255, 255];
+        self.border = [255, 255, 255, 18];
+        self.border_width = 1.0;
+        self.rounding = 100.0; // clamped to a full pill
+        self.padding = 8.0;
+        self.spacing = 16.0;
+        self.layout = OverlayLayout::Minimal;
+        self.show_labels = true;
+        self.highlight_first = false;
+        self.monospace_values = false;
+        self.show_dot = true;
+        self.dim_when_idle = true;
+        self.style_version = OVERLAY_STYLE_VERSION;
     }
 }
 
@@ -289,6 +332,9 @@ impl Settings {
         s.active_gap_secs = s.active_gap_secs.clamp(0.5, 60.0);
         s.sample_secs = s.sample_secs.clamp(1.0, 60.0);
         let o = &mut self.overlay;
+        if o.style_version < OVERLAY_STYLE_VERSION {
+            o.apply_default_look();
+        }
         o.font_size = o.font_size.clamp(8.0, 96.0);
         o.auto_hide_secs = o.auto_hide_secs.clamp(1.0, 600.0);
     }
